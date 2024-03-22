@@ -31,18 +31,37 @@ namespace LibraryWebServer.Controllers
         [HttpPost]
         public IActionResult CheckLogin( string name, int cardnum )
         {
-            // TODO: Fill in. Determine if login is successful or not.
+
+            //flag variable to determine login success
             bool loginSuccessful = false;
 
+            using (Team4LibraryContext db = new Team4LibraryContext())
+            {
+                //pull a query matching the name and card num
+                var query = from patron in db.Patrons
+                            where patron.Name == name && patron.CardNum == cardnum
+                            select patron;
+
+                //if a query is returned, we flag it as a success
+                if (query.Any())
+                {
+                    loginSuccessful = true;
+                }
+                
+            }
+
+
+            //if not success
             if ( !loginSuccessful )
             {
-                return Json( new { success = false } );
+                return Json( new { success = false } ); // model will deal with the rest
             }
-            else
+            else //if success
             {
+                //set our globals accordinly
                 user = name;
                 card = cardnum;
-                return Json( new { success = true } );
+                return Json( new { success = true } ); //and let the model know
             }
         }
 
@@ -73,9 +92,34 @@ namespace LibraryWebServer.Controllers
         public ActionResult AllTitles()
         {
 
-            // TODO: Implement
+            JsonResult jsonQuery;
 
-            return Json( null );
+            using (Team4LibraryContext db = new Team4LibraryContext())
+            {
+
+                //we merge titles, inventory, checkedout, and patrons into one query
+                var query = from t in db.Titles
+                            join i in db.Inventory on t.Isbn equals i.Isbn into inv
+                            from j1 in inv.DefaultIfEmpty()
+                            join c in db.CheckedOut on j1.Serial equals c.Serial into chkOut
+                            from j2 in chkOut.DefaultIfEmpty()
+                            join p in db.Patrons on j2.CardNum equals p.CardNum into patrons
+                            from j3 in patrons.DefaultIfEmpty()
+                            select new
+                            {
+                                isbn = t.Isbn,
+                                title = t.Title,
+                                author = t.Author,
+                                serial = j1 == null ? null : (uint?)j1.Serial, //and handle null serials
+                                name = j3 == null ? "" : j3.Name ?? "" //as well as null names
+                            };
+
+                jsonQuery = Json(query.ToArray()); //we give the json array to the model
+
+            }
+
+
+            return jsonQuery;
 
         }
 
@@ -90,8 +134,34 @@ namespace LibraryWebServer.Controllers
         [HttpPost]
         public ActionResult ListMyBooks()
         {
-            // TODO: Implement
-            return Json( null );
+
+            JsonResult jsonQuery;
+
+
+            using (Team4LibraryContext db = new Team4LibraryContext())
+            {
+                //similar query to above, we just need to ensure that the cardnum matches the logged in card user
+                var query =
+                    from t in db.Titles
+                    join i in db.Inventory on t.Isbn equals i.Isbn into inv
+                    from j1 in inv.DefaultIfEmpty()
+                    join c in db.CheckedOut on j1.Serial equals c.Serial into chkOut
+                    from j2 in chkOut.DefaultIfEmpty()
+                    join p in db.Patrons on j2.CardNum equals p.CardNum into patrons
+                    from j3 in patrons.DefaultIfEmpty()
+                    where j3.CardNum == card
+                    select new
+                    {
+                        title = t.Title,
+                        author = t.Author,
+                        serial = j1.Serial,
+                    };
+
+                jsonQuery = Json(query.ToArray());
+
+            }
+
+            return jsonQuery;
         }
 
 
@@ -106,9 +176,20 @@ namespace LibraryWebServer.Controllers
         [HttpPost]
         public ActionResult CheckOutBook( int serial )
         {
-            // You may have to cast serial to a (uint)
+            using (Team4LibraryContext db = new Team4LibraryContext())
+            {
+                //all we do here is just created a checkedout object
+                CheckedOut checkOut = new CheckedOut();
+                checkOut.CardNum = (uint)card;
+                checkOut.Serial = (uint)serial;
 
+                //and add it into the checkedout table
+                db.CheckedOut.Add(checkOut);
 
+                db.SaveChanges();   
+
+            }
+                
             return Json( new { success = true } );
         }
 
@@ -122,9 +203,21 @@ namespace LibraryWebServer.Controllers
         [HttpPost]
         public ActionResult ReturnBook( int serial )
         {
-            // You may have to cast serial to a (uint)
+            using (Team4LibraryContext db = new Team4LibraryContext())
+            {
+                //we extract a range with the card num and the serial number of the desired book to be removed 
+                var query =
+                    from c in db.CheckedOut
+                    where c.Serial == serial && c.CardNum == (uint)card
+                    select c;
+                    
+                //and remove it
+                db.CheckedOut.RemoveRange(query);
 
-            return Json( new { success = true } );
+                db.SaveChanges();
+            }
+
+                return Json( new { success = true } );
         }
 
 
